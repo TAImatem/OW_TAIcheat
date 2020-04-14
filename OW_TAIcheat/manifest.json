@@ -1,0 +1,9 @@
+{
+	"filename": "TAICheat.dll",
+	"author": "TAImatem",
+	"name": "TAICheat",
+	"uniqueName": "TruAI.TAICheat",
+	"version": "1.0",
+	"owmlVersion": "0.3.44",
+	"enabled": true
+}
