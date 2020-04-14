@@ -47,7 +47,6 @@ namespace OW_TAIcheat
 		{
 			console = ModHelper.Console;
 			ModHelper.Console.WriteLine("TAICheat ready!");
-
 		}
 
 		private void LateUpdate()
