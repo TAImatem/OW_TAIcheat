@@ -6,9 +6,243 @@ using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
 using UnityEngine.SceneManagement;
+using System.Collections;
+using System;
+using System.Collections.Generic;
 
 namespace OW_TAIcheat
 {
+	class InputInterceptor
+	{
+		public static void SAxisPost(SingleAxisCommand __instance)
+		{
+			KeyCode pos, neg;
+			FieldInfo val = typeof(SingleAxisCommand).GetField("_value", BindingFlags.NonPublic | BindingFlags.Instance);
+			float curval = (float)(val.GetValue(__instance));
+			if (OWInput.UsingGamepad())
+			{
+				pos = (KeyCode)(typeof(SingleAxisCommand).GetField("_gamepadKeyCodePositive", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(__instance));
+				neg = (KeyCode)(typeof(SingleAxisCommand).GetField("_gamepadKeyCodeNegative", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(__instance));
+			}
+			else
+			{
+				pos = (KeyCode)(typeof(SingleAxisCommand).GetField("_keyPositive", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(__instance));
+				neg = (KeyCode)(typeof(SingleAxisCommand).GetField("_keyNegative", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(__instance));
+			}
+			if (ComboHandler.ShouldIgnore(pos))
+			{
+				curval -= 1f;
+//				DebugInput.console.WriteLine("succesfully ignored " + pos.ToString());
+			}
+			if (ComboHandler.ShouldIgnore(neg))
+			{
+				curval += 1f;
+//				DebugInput.console.WriteLine("succesfully ignored " + neg.ToString());
+			}
+			val.SetValue(__instance, curval);
+		}
+	}
+	public class Combination
+	{
+		public Combination(string combo)
+		{
+			_combo = combo;
+			_pressed = false;
+		}
+
+		/*public bool IsHit()
+		{
+			return _pressed;
+		}*/
+
+		public string GetCombo()
+		{
+			return _combo;
+		}
+
+		public void SetPressed(bool state = true)
+		{
+			if (!_pressed)
+				_firstPressed = Time.realtimeSinceStartup;
+			_lastPressed = Time.realtimeSinceStartup;
+			_pressed = state;
+		}
+
+		public float GetLastPressMoment()
+		{
+			return _lastPressed;
+		}
+		public float GetPressDuration()
+		{
+			return _lastPressed-_firstPressed;
+		}
+
+		private bool _pressed;
+
+		private string _combo;
+		private float _firstPressed = 0f, _lastPressed = 0f;
+	}
+	public class ComboComparer : IEqualityComparer<BitArray>
+	{
+		public bool Equals(BitArray x, BitArray y)
+		{
+			if (x.Length != y.Length)
+			{
+				return false;
+			}
+			for (int i = 0; i < x.Length; i++)
+			{
+				if (x[i] ^ y[i])
+				{
+					return false;
+				}
+			}
+			return true;
+		}
+
+		public int GetHashCode(BitArray obj)
+		{
+			int result = 1;
+			for (int i = 0; i < obj.Length; i++)
+			{
+				unchecked
+				{
+					if (obj[i])
+						result = result * i;
+				}
+			}
+			return result;
+		}
+	}
+	public static class ComboHandler
+	{
+		private static void UpdateCombo()
+		{
+			if (Time.realtimeSinceStartup - lastUpdate > 0.01f)
+			{
+				lastUpdate = Time.realtimeSinceStartup;
+				Int64 hash = 0;
+				int[] keys = new int[7];
+				int t = 0;
+				bool countdowntrigger = false;
+				for (int code = 8; code < 350; code++)
+					if (Enum.IsDefined(typeof(KeyCode), (KeyCode)code)&& Input.GetKey((KeyCode)code))
+					{
+							keys[t] = code;
+							t++;
+							if (t > 7)
+							{
+								hash = -2;
+								break;
+							}
+							hash = hash * 350 + code;
+							if (Time.realtimeSinceStartup - timeout[code] < cooldown)
+								countdowntrigger = true;
+					}
+				if (comboReg.ContainsKey(hash))
+				{
+					Combination temp = comboReg[hash];
+					if (temp == lastPressed || !countdowntrigger)
+					{
+						lastPressed = comboReg[hash];
+						lastPressed.SetPressed();
+						for (int i = 0; i < t; i++)
+							timeout[keys[i]] = Time.realtimeSinceStartup;
+						//DebugInput.console.WriteLine("succesfully recognized combo " + lastPressed.GetCombo());
+						return;
+					}
+				}
+				if (lastPressed != null)
+					lastPressed.SetPressed(false);
+				lastPressed = null;
+			}
+		}
+		public static bool WasTapped(Combination comb)
+		{
+			UpdateCombo();
+			return comb != lastPressed && (Time.realtimeSinceStartup - comb.GetLastPressMoment() < tapKeep) && (comb.GetPressDuration() < tapDuration);
+		}
+		public static bool IsPressed(Combination comb)
+		{
+			UpdateCombo();
+			return lastPressed == comb;
+		}
+		private static Int64 ParseCombo(string combo)
+		{
+			combo = combo.Trim().Replace("ctrl", "control");
+			Int64[] curcom = new Int64[7];
+			int i = 0;
+			foreach (string key in combo.Split('+'))
+			{
+				if (i > 6)
+					return -2;
+				KeyCode num;
+				if (key.Contains("xbox_"))
+				{
+					string tkey = key.Substring(5);
+					XboxButton tnum = (XboxButton)Enum.Parse(typeof(XboxButton), tkey, true);
+					if (Enum.IsDefined(typeof(XboxButton), tnum))
+						num = InputTranslator.GetKeyCode(tnum, false);
+					else
+						return -1;
+				}
+				else
+				{
+					string tkey = key;
+					if (key == "control")
+						tkey = "leftcontrol";
+					else if (key == "shift")
+						tkey = "leftshift";
+					else if (key == "alt")
+						tkey = "leftalt";
+					num = (KeyCode)Enum.Parse(typeof(KeyCode), tkey, true);
+				}
+				if (Enum.IsDefined(typeof(KeyCode), num))
+					curcom[i] = (int)num;
+				else
+					return -1;
+				i++;
+			}
+			Array.Sort(curcom);
+			Int64 hsh = 0;
+			for (i = 0; i<7; i++)
+			{
+				hsh = hsh * 350 + curcom[i];
+			}
+			return (comboReg.ContainsKey(hsh) ? -3 : hsh);
+		}
+		public static int RegisterCombo(Combination combo)
+		{
+			string[] combs = combo.GetCombo().ToLower().Split('/');
+			List<Int64> combos = new List<Int64>();
+			foreach (string comstr in combs)
+			{
+				Int64 temp = ParseCombo(comstr);
+				if (temp<=0)
+					return (int)temp;
+				else
+					combos.Add(temp);
+			}
+			foreach (Int64 comb in combos)
+				comboReg.Add(comb, combo);
+			DebugInput.console.WriteLine("succesfully registered " + combo.GetCombo());
+			return 1;
+		}
+		public static bool ShouldIgnore(KeyCode code)
+		{
+			UpdateCombo();
+			return Time.realtimeSinceStartup - timeout[(int)code] > cooldown;
+		}
+
+		private static float[] timeout = new float[350];
+		private static Dictionary<Int64, Combination> comboReg = new Dictionary<Int64, Combination>();
+		private static Combination lastPressed;
+		private static float lastUpdate;
+		private static float cooldown = 0.016f;
+		private static float tapKeep = 0.3f;
+		private static float tapDuration = 0.1f;
+	}
+
 	public static class MyExtensions
 	{
 		public static void TAIcheat_SetTranslationalThrust(this JetpackThrusterModel jet, float newacc)
@@ -40,12 +274,12 @@ namespace OW_TAIcheat
 		}
 
 		public static IModConsole console;
-		public static GameObject player;
-		public static PlayerSpacesuit playersuit;
 
 		private void Start()
 		{
 			console = ModHelper.Console;
+			ModHelper.HarmonyHelper.AddPostfix<SingleAxisCommand>("Update", typeof(InputInterceptor), "SAxisPost");
+			if (ComboHandler.RegisterCombo(new Combination("leftshift+l/rightshift+l"))>0) ModHelper.Console.WriteLine("Ludicrous combo Registered!");
 			ModHelper.Console.WriteLine("TAICheat ready!");
 		}
 
@@ -68,7 +302,7 @@ namespace OW_TAIcheat
 			{
 				return;
 			}
-			if (DebugInput.inputHUD == 1)
+			if (inputHUD == 1)
 			{
 				GUI.Label(new Rect(10f + num, 10f, 200f, 20f), "Time Scale: " + Mathf.Round(Time.timeScale * 100f) / 100f);
 				GUI.Label(new Rect(10f + num, 25f, 200f, 20f), string.Concat(new object[]
@@ -124,48 +358,48 @@ namespace OW_TAIcheat
 				GUI.Label(new Rect(10f + num, 190f, 400f, 20f), string.Concat(new object[]
 				{
 				"Inspector layer: ",
-				DebugInput.rayMask,
+				rayMask,
 				" ",
-				LayerMask.LayerToName(DebugInput.rayMask)
+				LayerMask.LayerToName(rayMask)
 				}));
-				if (DebugInput.GetWarpOWRigidbody())
+				if (GetWarpOWRigidbody())
 				{
 					GUI.Label(new Rect(10f + num, 205f, 400f, 20f), string.Concat(new string[]
 					{
 					"Warp Body: ",
-					DebugInput.GetWarpOWRigidbody().gameObject.name,
+					GetWarpOWRigidbody().gameObject.name,
 					" layer: ",
-					DebugInput.GetWarpOWRigidbody().gameObject.layer.ToString(),
+					GetWarpOWRigidbody().gameObject.layer.ToString(),
 					" ",
-					LayerMask.LayerToName(DebugInput.GetWarpOWRigidbody().gameObject.layer)
+					LayerMask.LayerToName(GetWarpOWRigidbody().gameObject.layer)
 					}));
 				}
-				if (DebugInput.hit.collider)
+				if (hit.collider)
 				{
 					GUI.Label(new Rect(10f + num, 220f, 400f, 20f), string.Concat(new string[]
 					{
 					"Latest hit layer: ",
-					DebugInput.hit.collider.gameObject.layer.ToString(),
+					hit.collider.gameObject.layer.ToString(),
 					" ",
-					LayerMask.LayerToName(DebugInput.hit.collider.gameObject.layer)
+					LayerMask.LayerToName(hit.collider.gameObject.layer)
 					}));
-					GUI.Label(new Rect(10f + num, 235f, 600f, 20f), "Name: " + DebugInput.hit.collider.gameObject.name + " Distance: " + (DebugInput.hit.point - Locator.GetPlayerBody().transform.position).magnitude.ToString());
+					GUI.Label(new Rect(10f + num, 235f, 600f, 20f), "Name: " + hit.collider.gameObject.name + " Distance: " + (hit.point - Locator.GetPlayerBody().transform.position).magnitude.ToString());
 				}
 				/*if (PadEZ.PadManager.GetActiveController()!=null)
 				{
 					GUI.Label(new Rect(10f + num, 250f, 600f, 20f), PadEZ.PadManager.GetActiveController().GetIndex().ToString() + " " + PadEZ.PadManager.GetActiveController().GetPadType().ToString() +" "+ UnityEngine.Input.GetJoystickNames()[PadEZ.PadManager.GetActiveController().GetIndex()]);
 				}*/
 			}
-			if (DebugInput.inputHUD == 2)
+			if (inputHUD == 2)
 			{
 				GUI.Label(new Rect(10f, 10f, 300f, 2500f), ReadInputManager.ReadCommandInputs(false));
 			}
-			if (DebugInput.inputHUD == 3)
+			if (inputHUD == 3)
 			{
 				GUI.Label(new Rect(0f, 0f, 300f, 2500f), ReadInputManager.ReadCommandInputs(false));
 				GUI.Label(new Rect(300f, 0f, 300f, 2500f), ReadInputManager.ReadCommandInputs(true));
 			}
-			if (DebugInput.inputHUD == 4)
+			if (inputHUD == 4)
 			{
 				GUI.Label(new Rect(0f, 0f, 500f, 2500f), ReadInputManager.ReadInputAxes());
 				GUI.Label(new Rect(500f, 0f, 500f, 2500f), ReadInputManager.ReadRawInputManagerButtons());
@@ -177,13 +411,14 @@ namespace OW_TAIcheat
 		private InputMode[] _inputModeArray;
 		private MeshRenderer[] _thrusterArrowRenderers;
 		private float _gForce;
+		private PlayerSpacesuit playersuit;
 
 		private void FixedUpdate()
 		{
 			if (this._gotoWarpPointNextFrame)
 			{
 				this._gotoWarpPointNextFrame = false;
-				Locator.GetPlayerBody().MoveToRelativeLocation(DebugInput._relativeData[DebugInput.relIndex], DebugInput._relativeBody[DebugInput.relIndex], null);
+				Locator.GetPlayerBody().MoveToRelativeLocation(_relativeData[relIndex], _relativeBody[relIndex], null);
 			}
 			if (this._engageLudicrousSpeed)
 			{
@@ -199,8 +434,8 @@ namespace OW_TAIcheat
 			this.altPressed = global::Input.GetKey(KeyCode.LeftAlt) || global::Input.GetKey(KeyCode.RightAlt);
 			if (global::Input.GetKeyDown(KeyCode.BackQuote))
 			{
-				DebugInput.cheatsOn = !DebugInput.cheatsOn;
-				if (DebugInput.cheatsOn)
+				cheatsOn = !cheatsOn;
+				if (cheatsOn)
 					AudioSource.PlayClipAtPoint(Locator.GetAudioManager().GetAudioClipArray(global::AudioType.NomaiPowerOn)[0], Locator.GetActiveCamera().transform.position);
 				else
 					AudioSource.PlayClipAtPoint(Locator.GetAudioManager().GetAudioClipArray(global::AudioType.NomaiPowerOff)[0], Locator.GetActiveCamera().transform.position);
@@ -214,7 +449,7 @@ namespace OW_TAIcheat
 				playersuit = Locator.GetPlayerSuit();
 			if (playersuit == null || !playersuit.enabled)
 				return;
-			if (DebugInput.cheatsOn)
+			if (cheatsOn)
 			{
 				if (global::Input.GetKeyDown(KeyCode.PageDown))
 				{
@@ -223,8 +458,8 @@ namespace OW_TAIcheat
 						if (Locator.GetProbe().GetAnchor().IsAnchored())
 						{
 							Transform transform = Locator.GetProbe().transform;
-							DebugInput._relativeBody[DebugInput.relIndex] = transform.parent.GetAttachedOWRigidbody(false);
-							DebugInput._relativeData[DebugInput.relIndex] = new RelativeLocationData(Locator.GetProbe().GetAnchor().GetAttachedOWRigidbody(), DebugInput._relativeBody[DebugInput.relIndex], null);
+							_relativeBody[relIndex] = transform.parent.GetAttachedOWRigidbody(false);
+							_relativeData[relIndex] = new RelativeLocationData(Locator.GetProbe().GetAnchor().GetAttachedOWRigidbody(), _relativeBody[relIndex], null);
 							this.COn = true;
 						}
 					}
@@ -232,21 +467,21 @@ namespace OW_TAIcheat
 					{
 						OWCamera activeCamera = Locator.GetActiveCamera();
 						Vector3 position = new Vector3((float)(activeCamera.pixelWidth - 1) / 2f, (float)(activeCamera.pixelHeight - 1) / 2f);
-						if (!Physics.Raycast(activeCamera.ScreenPointToRay(position), out DebugInput.hit, float.PositiveInfinity, OWLayerMask.BuildPhysicalMask().value))
+						if (!Physics.Raycast(activeCamera.ScreenPointToRay(position), out hit, float.PositiveInfinity, OWLayerMask.BuildPhysicalMask().value))
 						{
 							foreach (RaycastHit raycastHit in Physics.RaycastAll(activeCamera.ScreenPointToRay(position), float.PositiveInfinity, OWLayerMask.BuildPhysicalMask().value | 524288))
 							{
-								DebugInput.hit = raycastHit;
+								hit = raycastHit;
 								if (raycastHit.collider.GetAttachedOWRigidbody(false))
 								{
 									break;
 								}
 							}
-							if (!DebugInput.hit.collider.GetAttachedOWRigidbody(false))
+							if (!hit.collider.GetAttachedOWRigidbody(false))
 							{
 								foreach (RaycastHit raycastHit2 in Physics.RaycastAll(activeCamera.ScreenPointToRay(position)))
 								{
-									DebugInput.hit = raycastHit2;
+									hit = raycastHit2;
 									if (raycastHit2.collider.GetAttachedOWRigidbody(false))
 									{
 										break;
@@ -254,19 +489,19 @@ namespace OW_TAIcheat
 								}
 							}
 						}
-						if (DebugInput.hit.collider.GetAttachedOWRigidbody(false))
+						if (hit.collider.GetAttachedOWRigidbody(false))
 						{
-							DebugInput._hasSetWarpPoint[DebugInput.relIndex] = true;
-							DebugInput._relativeBody[DebugInput.relIndex] = DebugInput.hit.rigidbody.GetAttachedOWRigidbody(false);
-							DebugInput._relativeData[DebugInput.relIndex] = relconstr(DebugInput.hit.point, Quaternion.FromToRotation(Locator.GetPlayerBody().transform.up, DebugInput.hit.normal) * Locator.GetPlayerBody().transform.rotation, DebugInput._relativeBody[DebugInput.relIndex].GetPointVelocity(DebugInput.hit.point), DebugInput._relativeBody[DebugInput.relIndex], null);
+							_hasSetWarpPoint[relIndex] = true;
+							_relativeBody[relIndex] = hit.rigidbody.GetAttachedOWRigidbody(false);
+							_relativeData[relIndex] = relconstr(hit.point, Quaternion.FromToRotation(Locator.GetPlayerBody().transform.up, hit.normal) * Locator.GetPlayerBody().transform.rotation, _relativeBody[relIndex].GetPointVelocity(hit.point), _relativeBody[relIndex], null);
 							this.COn = true;
 						}
 					}
 					else if (Locator.GetPlayerSectorDetector().GetLastEnteredSector() != null)
 					{
-						DebugInput._hasSetWarpPoint[DebugInput.relIndex] = true;
-						DebugInput._relativeBody[DebugInput.relIndex] = Locator.GetPlayerSectorDetector().GetLastEnteredSector().GetOWRigidbody();
-						DebugInput._relativeData[DebugInput.relIndex] = new RelativeLocationData(Locator.GetPlayerBody(), DebugInput._relativeBody[DebugInput.relIndex], null);
+						_hasSetWarpPoint[relIndex] = true;
+						_relativeBody[relIndex] = Locator.GetPlayerSectorDetector().GetLastEnteredSector().GetOWRigidbody();
+						_relativeData[relIndex] = new RelativeLocationData(Locator.GetPlayerBody(), _relativeBody[relIndex], null);
 						this.COn = true;
 					}
 				}
@@ -274,18 +509,18 @@ namespace OW_TAIcheat
 				{
 					if (this.altPressed)
 					{
-						DebugInput.rayMask++;
-						DebugInput.rayMask %= 32;
+						rayMask++;
+						rayMask %= 32;
 					}
 					else
 					{
 						OWCamera activeCamera2 = Locator.GetActiveCamera();
 						Vector3 position2 = new Vector3((float)(activeCamera2.pixelWidth - 1) / 2f, (float)(activeCamera2.pixelHeight - 1) / 2f);
-						if (!Physics.Raycast(activeCamera2.ScreenPointToRay(position2), out DebugInput.hit, float.PositiveInfinity, 1 << DebugInput.rayMask) && DebugInput.hit.collider.GetAttachedOWRigidbody(false))
+						if (!Physics.Raycast(activeCamera2.ScreenPointToRay(position2), out hit, float.PositiveInfinity, 1 << rayMask) && hit.collider.GetAttachedOWRigidbody(false))
 						{
-							DebugInput._hasSetWarpPoint[DebugInput.relIndex] = true;
-							DebugInput._relativeBody[DebugInput.relIndex] = DebugInput.hit.rigidbody.GetAttachedOWRigidbody(false);
-							DebugInput._relativeData[DebugInput.relIndex] = relconstr(DebugInput.hit.point, Quaternion.FromToRotation(Locator.GetPlayerBody().transform.up, DebugInput.hit.normal) * Locator.GetPlayerBody().transform.rotation, DebugInput._relativeBody[DebugInput.relIndex].GetPointVelocity(DebugInput.hit.point), DebugInput._relativeBody[DebugInput.relIndex], null);
+							_hasSetWarpPoint[relIndex] = true;
+							_relativeBody[relIndex] = hit.rigidbody.GetAttachedOWRigidbody(false);
+							_relativeData[relIndex] = relconstr(hit.point, Quaternion.FromToRotation(Locator.GetPlayerBody().transform.up, hit.normal) * Locator.GetPlayerBody().transform.rotation, _relativeBody[relIndex].GetPointVelocity(hit.point), _relativeBody[relIndex], null);
 							this.COn = true;
 						}
 					}
@@ -295,10 +530,10 @@ namespace OW_TAIcheat
 					if (this.altPressed)
 					{
 						this.COn = true;
-						DebugInput.relIndex++;
-						DebugInput.relIndex %= 10;
+						relIndex++;
+						relIndex %= 10;
 					}
-					else if (DebugInput._hasSetWarpPoint[DebugInput.relIndex])
+					else if (_hasSetWarpPoint[relIndex])
 					{
 						this.COn = true;
 						this._gotoWarpPointNextFrame = true;
@@ -342,8 +577,8 @@ namespace OW_TAIcheat
 				{
 					if (this.altPressed)
 					{
-						DebugInput.hiddenHUD = !DebugInput.hiddenHUD;
-						if (DebugInput.hiddenHUD)
+						hiddenHUD = !hiddenHUD;
+						if (hiddenHUD)
 						{
 							oldmode = (int)typeof(GUIMode).GetAnyField("_renderMode").GetValue(null);
 							typeof(GUIMode).GetAnyField("_renderMode").SetValue(null, 7);
@@ -406,7 +641,7 @@ namespace OW_TAIcheat
 						this.COn = true;
 					}
 				}
-				if (global::Input.GetKeyDown(KeyCode.L))
+				if (global::Input.GetKey(KeyCode.L))
 				{
 					if (this.shiftPressed)
 					{
@@ -418,7 +653,7 @@ namespace OW_TAIcheat
 						this.ludicrousMult /= 2f;
 						this.COff = true;
 					}
-					else
+					else if (Input.GetKeyDown(KeyCode.L))
 					{
 						this._engageLudicrousSpeed = true;
 						AudioSource.PlayClipAtPoint(Locator.GetAudioManager().GetAudioClipArray(global::AudioType.ToolProbeLaunch)[0], Locator.GetPlayerBody().transform.position);
@@ -522,8 +757,8 @@ namespace OW_TAIcheat
 				}
 				if (global::Input.GetKeyDown(KeyCode.Backslash))
 				{
-					DebugInput.inputHUD++;
-					DebugInput.inputHUD %= 5;
+					inputHUD++;
+					inputHUD %= 5;
 				}
 				if (global::Input.GetKeyDown(KeyCode.N))
 				{
@@ -670,13 +905,13 @@ namespace OW_TAIcheat
 			}
 		}
 
-		public static OWRigidbody GetWarpOWRigidbody()
+		public OWRigidbody GetWarpOWRigidbody()
 		{
-			return DebugInput._relativeBody[DebugInput.relIndex];
+			return _relativeBody[relIndex];
 		}
 
 		private bool altPressed, shiftPressed, ctrlPressed;
-		public static bool cheatsOn;
+		private bool cheatsOn;
 		private bool COff, COn, CMOn, CMOff;
 
 		private bool _revealRumorsOnly = true;
@@ -691,15 +926,15 @@ namespace OW_TAIcheat
 
 
 		private bool _gotoWarpPointNextFrame;
-		private static RelativeLocationData[] _relativeData = new RelativeLocationData[10];
-		private static OWRigidbody[] _relativeBody = new OWRigidbody[10];
-		private static bool[] _hasSetWarpPoint = new bool[10];
-		private static int relIndex;
-		public static RaycastHit hit;
-		public static int rayMask;
+		private RelativeLocationData[] _relativeData = new RelativeLocationData[10];
+		private OWRigidbody[] _relativeBody = new OWRigidbody[10];
+		private bool[] _hasSetWarpPoint = new bool[10];
+		private int relIndex;
+		private RaycastHit hit;
+		private int rayMask;
 
 		private int oldmode;
 		public static bool hiddenHUD;
-		public static int inputHUD = 0;
+		private int inputHUD = 0;
 	}
 }
