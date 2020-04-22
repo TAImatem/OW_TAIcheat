@@ -91,6 +91,7 @@
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="default-config.json" />
     <None Include="manifest.json" />
     <None Include="packages.config" />
   </ItemGroup>
@@ -101,6 +102,7 @@
   <PropertyGroup>
     <PostBuildEvent>xcopy /Y "$(TargetPath)" "$(SolutionDir)releases\$(ProjectName)\"
 xcopy /Y "$(ProjectDir)manifest.json" "$(SolutionDir)releases\$(ProjectName)\"
+xcopy /Y "$(ProjectDir)default-config.json" "$(SolutionDir)releases\$(ProjectName)\"
 xcopy /Y "$(ProjectDir)buttons.txt" "$(SolutionDir)releases\$(ProjectName)\"
 7z a -tzip -mx5 -r0 $(SolutionDir)releases\$(ProjectName).zip $(SolutionDir)releases\$(ProjectName)\*.*</PostBuildEvent>
   </PropertyGroup>

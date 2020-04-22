@@ -62,9 +62,17 @@ namespace OW_TAIcheat
 
 		public void SetPressed(bool state = true)
 		{
-			if (!_pressed)
-				_firstPressed = Time.realtimeSinceStartup;
-			_lastPressed = Time.realtimeSinceStartup;
+			if (state)
+			{
+				if (!_pressed)
+				{
+					_first = true;
+					_firstPressed = Time.realtimeSinceStartup;
+				}
+				_lastPressed = Time.realtimeSinceStartup;
+			}
+			else
+				_first = false;
 			_pressed = state;
 		}
 
@@ -77,7 +85,17 @@ namespace OW_TAIcheat
 			return _lastPressed-_firstPressed;
 		}
 
-		private bool _pressed;
+		public bool IsFirst()
+		{
+			if (_first)
+			{
+				_first = false;
+				return true;
+			}
+			return false;
+		}
+
+		private bool _pressed,_first=false;
 
 		private string _combo;
 		private float _firstPressed = 0f, _lastPressed = 0f;
@@ -167,6 +185,11 @@ namespace OW_TAIcheat
 			UpdateCombo();
 			return lastPressed == comb;
 		}
+		public static bool IsNewlyPressed(Combination comb)
+		{
+			UpdateCombo();
+			return lastPressed == comb && comb.IsFirst();
+		}
 		private static Int64 ParseCombo(string combo)
 		{
 			combo = combo.Trim().Replace("ctrl", "control");
@@ -213,6 +236,11 @@ namespace OW_TAIcheat
 		}
 		public static int RegisterCombo(Combination combo)
 		{
+			if (combo == null || combo.GetCombo() == null)
+			{
+				DebugInput.console.WriteLine("combo is null");
+				return -1;
+			}
 			string[] combs = combo.GetCombo().ToLower().Split('/');
 			List<Int64> combos = new List<Int64>();
 			foreach (string comstr in combs)
@@ -277,11 +305,32 @@ namespace OW_TAIcheat
 
 		private void Start()
 		{
-			console = ModHelper.Console;
 			ModHelper.HarmonyHelper.AddPostfix<SingleAxisCommand>("Update", typeof(InputInterceptor), "SAxisPost");
-			if (ComboHandler.RegisterCombo(new Combination("leftshift+l/rightshift+l"))>0) ModHelper.Console.WriteLine("Ludicrous combo Registered!");
 			ModHelper.Console.WriteLine("TAICheat ready!");
 		}
+
+		public override void Configure(IModConfig config)
+		{
+			console = ModHelper.Console;
+			inputs = new Dictionary<string, Combination>();
+			foreach (string name in config.Settings.Keys)
+			{
+				if (config.Settings[name] is string)
+				{
+					Combination tempc = new Combination(config.Settings[name] as string);
+					inputs.Add(name, tempc);
+					int temp = ComboHandler.RegisterCombo(tempc);
+					if (temp<0)
+					{
+						if (temp == -1) ModHelper.Console.WriteLine("Failed to register \"" + name + "\": invalid combo!");
+						else if (temp == -2) ModHelper.Console.WriteLine("Failed to register \"" + name + "\": too long!");
+						else if (temp == -3) ModHelper.Console.WriteLine("Failed to register \"" + name + "\": already in use!");
+					}
+				}
+			}
+		}
+
+		Dictionary<string, Combination> inputs;
 
 		private void LateUpdate()
 		{
@@ -451,93 +500,84 @@ namespace OW_TAIcheat
 				return;
 			if (cheatsOn)
 			{
-				if (global::Input.GetKeyDown(KeyCode.PageDown))
+				if (ComboHandler.IsNewlyPressed(inputs["(tele) Save probe's pos"]))
 				{
-					if (this.shiftPressed || this.ctrlPressed)
+					if (Locator.GetProbe().GetAnchor().IsAnchored())
 					{
-						if (Locator.GetProbe().GetAnchor().IsAnchored())
-						{
-							Transform transform = Locator.GetProbe().transform;
-							_relativeBody[relIndex] = transform.parent.GetAttachedOWRigidbody(false);
-							_relativeData[relIndex] = new RelativeLocationData(Locator.GetProbe().GetAnchor().GetAttachedOWRigidbody(), _relativeBody[relIndex], null);
-							this.COn = true;
-						}
+						Transform transform = Locator.GetProbe().transform;
+						_relativeBody[relIndex] = transform.parent.GetAttachedOWRigidbody(false);
+						_relativeData[relIndex] = new RelativeLocationData(Locator.GetProbe().GetAnchor().GetAttachedOWRigidbody(), _relativeBody[relIndex], null);
+						this.COn = true;
 					}
-					else if (this.altPressed)
+				}
+				if (ComboHandler.IsNewlyPressed(inputs["(tele) Save RayCast pos"]))
+				{
+					OWCamera activeCamera = Locator.GetActiveCamera();
+					Vector3 position = new Vector3((float)(activeCamera.pixelWidth - 1) / 2f, (float)(activeCamera.pixelHeight - 1) / 2f);
+					if (!Physics.Raycast(activeCamera.ScreenPointToRay(position), out hit, float.PositiveInfinity, OWLayerMask.BuildPhysicalMask().value))
 					{
-						OWCamera activeCamera = Locator.GetActiveCamera();
-						Vector3 position = new Vector3((float)(activeCamera.pixelWidth - 1) / 2f, (float)(activeCamera.pixelHeight - 1) / 2f);
-						if (!Physics.Raycast(activeCamera.ScreenPointToRay(position), out hit, float.PositiveInfinity, OWLayerMask.BuildPhysicalMask().value))
+						foreach (RaycastHit raycastHit in Physics.RaycastAll(activeCamera.ScreenPointToRay(position), float.PositiveInfinity, OWLayerMask.BuildPhysicalMask().value | 524288))
 						{
-							foreach (RaycastHit raycastHit in Physics.RaycastAll(activeCamera.ScreenPointToRay(position), float.PositiveInfinity, OWLayerMask.BuildPhysicalMask().value | 524288))
+							hit = raycastHit;
+							if (raycastHit.collider.GetAttachedOWRigidbody(false))
 							{
-								hit = raycastHit;
-								if (raycastHit.collider.GetAttachedOWRigidbody(false))
+								break;
+							}
+						}
+						if (!hit.collider.GetAttachedOWRigidbody(false))
+						{
+							foreach (RaycastHit raycastHit2 in Physics.RaycastAll(activeCamera.ScreenPointToRay(position)))
+							{
+								hit = raycastHit2;
+								if (raycastHit2.collider.GetAttachedOWRigidbody(false))
 								{
 									break;
 								}
 							}
-							if (!hit.collider.GetAttachedOWRigidbody(false))
-							{
-								foreach (RaycastHit raycastHit2 in Physics.RaycastAll(activeCamera.ScreenPointToRay(position)))
-								{
-									hit = raycastHit2;
-									if (raycastHit2.collider.GetAttachedOWRigidbody(false))
-									{
-										break;
-									}
-								}
-							}
-						}
-						if (hit.collider.GetAttachedOWRigidbody(false))
-						{
-							_hasSetWarpPoint[relIndex] = true;
-							_relativeBody[relIndex] = hit.rigidbody.GetAttachedOWRigidbody(false);
-							_relativeData[relIndex] = relconstr(hit.point, Quaternion.FromToRotation(Locator.GetPlayerBody().transform.up, hit.normal) * Locator.GetPlayerBody().transform.rotation, _relativeBody[relIndex].GetPointVelocity(hit.point), _relativeBody[relIndex], null);
-							this.COn = true;
 						}
 					}
-					else if (Locator.GetPlayerSectorDetector().GetLastEnteredSector() != null)
+					if (hit.collider.GetAttachedOWRigidbody(false))
 					{
 						_hasSetWarpPoint[relIndex] = true;
-						_relativeBody[relIndex] = Locator.GetPlayerSectorDetector().GetLastEnteredSector().GetOWRigidbody();
-						_relativeData[relIndex] = new RelativeLocationData(Locator.GetPlayerBody(), _relativeBody[relIndex], null);
+						_relativeBody[relIndex] = hit.rigidbody.GetAttachedOWRigidbody(false);
+						_relativeData[relIndex] = relconstr(hit.point, Quaternion.FromToRotation(Locator.GetPlayerBody().transform.up, hit.normal) * Locator.GetPlayerBody().transform.rotation, _relativeBody[relIndex].GetPointVelocity(hit.point), _relativeBody[relIndex], null);
 						this.COn = true;
 					}
 				}
-				if (global::Input.GetKeyDown(KeyCode.Home))
+				if (ComboHandler.IsNewlyPressed(inputs["(tele) Save player's pos"]) && Locator.GetPlayerSectorDetector().GetLastEnteredSector() != null)
 				{
-					if (this.altPressed)
+					_hasSetWarpPoint[relIndex] = true;
+					_relativeBody[relIndex] = Locator.GetPlayerSectorDetector().GetLastEnteredSector().GetOWRigidbody();
+					_relativeData[relIndex] = new RelativeLocationData(Locator.GetPlayerBody(), _relativeBody[relIndex], null);
+					this.COn = true;
+				}
+				if (ComboHandler.IsNewlyPressed(inputs["(insp) Cycle through layers"]))
+				{
+					rayMask++;
+					rayMask %= 32;
+				}
+				if (ComboHandler.IsNewlyPressed(inputs["(insp) RayCast"]))
+				{
+					OWCamera activeCamera2 = Locator.GetActiveCamera();
+					Vector3 position2 = new Vector3((float)(activeCamera2.pixelWidth - 1) / 2f, (float)(activeCamera2.pixelHeight - 1) / 2f);
+					if (!Physics.Raycast(activeCamera2.ScreenPointToRay(position2), out hit, float.PositiveInfinity, 1 << rayMask) && hit.collider.GetAttachedOWRigidbody(false))
 					{
-						rayMask++;
-						rayMask %= 32;
-					}
-					else
-					{
-						OWCamera activeCamera2 = Locator.GetActiveCamera();
-						Vector3 position2 = new Vector3((float)(activeCamera2.pixelWidth - 1) / 2f, (float)(activeCamera2.pixelHeight - 1) / 2f);
-						if (!Physics.Raycast(activeCamera2.ScreenPointToRay(position2), out hit, float.PositiveInfinity, 1 << rayMask) && hit.collider.GetAttachedOWRigidbody(false))
-						{
-							_hasSetWarpPoint[relIndex] = true;
-							_relativeBody[relIndex] = hit.rigidbody.GetAttachedOWRigidbody(false);
-							_relativeData[relIndex] = relconstr(hit.point, Quaternion.FromToRotation(Locator.GetPlayerBody().transform.up, hit.normal) * Locator.GetPlayerBody().transform.rotation, _relativeBody[relIndex].GetPointVelocity(hit.point), _relativeBody[relIndex], null);
-							this.COn = true;
-						}
+						_hasSetWarpPoint[relIndex] = true;
+						_relativeBody[relIndex] = hit.rigidbody.GetAttachedOWRigidbody(false);
+						_relativeData[relIndex] = relconstr(hit.point, Quaternion.FromToRotation(Locator.GetPlayerBody().transform.up, hit.normal) * Locator.GetPlayerBody().transform.rotation, _relativeBody[relIndex].GetPointVelocity(hit.point), _relativeBody[relIndex], null);
+						this.COn = true;
 					}
 				}
-				if (global::Input.GetKeyDown(KeyCode.PageUp))
+				if (ComboHandler.IsNewlyPressed(inputs["(tele) Cycle through pos"]))
 				{
-					if (this.altPressed)
-					{
-						this.COn = true;
-						relIndex++;
-						relIndex %= 10;
-					}
-					else if (_hasSetWarpPoint[relIndex])
-					{
-						this.COn = true;
-						this._gotoWarpPointNextFrame = true;
-					}
+					this.COn = true;
+					relIndex++;
+					relIndex %= 10;
+				}
+				else if (ComboHandler.IsNewlyPressed(inputs["(tele) Tele to saved pos"]) && _hasSetWarpPoint[relIndex])
+				{
+					this.COn = true;
+					this._gotoWarpPointNextFrame = true;
 				}
 				/*if (global::Input.GetKeyDown(DebugKeyCode.destroyTimeline))
 				{
@@ -552,17 +592,16 @@ namespace OW_TAIcheat
 				{
 					Locator.GetPlayerTransform().GetComponent<PlayerResources>().SetDebugKillResources(false);
 				}*/
-				if (global::Input.GetKeyDown(KeyCode.G))
+				if (ComboHandler.IsNewlyPressed(inputs["Learn launchcode"]))
 				{
-					if (this.altPressed)
+					if (PlayerData.IsLoaded())
 					{
-						if (PlayerData.IsLoaded())
-						{
-							PlayerData.LearnLaunchCodes();
-							this.COn = true;
-						}
+						PlayerData.LearnLaunchCodes();
+						this.COn = true;
 					}
-					else if (!Locator.GetPlayerSuit().IsWearingSuit(true))
+				}
+				if (ComboHandler.IsNewlyPressed(inputs["Toggle spacesuit"]))
+					if (!Locator.GetPlayerSuit().IsWearingSuit(true))
 					{
 						Locator.GetPlayerSuit().SuitUp(false, false);
 						this.COn = true;
@@ -572,311 +611,288 @@ namespace OW_TAIcheat
 						Locator.GetPlayerSuit().RemoveSuit(false);
 						this.COff = true;
 					}
-				}
-				if (global::Input.GetKeyDown(KeyCode.H))
+				if (ComboHandler.IsNewlyPressed(inputs["Toggle HUD"]))
 				{
-					if (this.altPressed)
+					hiddenHUD = !hiddenHUD;
+					if (hiddenHUD)
 					{
-						hiddenHUD = !hiddenHUD;
-						if (hiddenHUD)
-						{
-							oldmode = (int)typeof(GUIMode).GetAnyField("_renderMode").GetValue(null);
-							typeof(GUIMode).GetAnyField("_renderMode").SetValue(null, 7);
-							this.COn = true;
-						}
-						else
-						{
-							typeof(GUIMode).GetAnyField("_renderMode").SetValue(null, oldmode);
-							this.COff = true;
-						}
-						GlobalMessenger.FireEvent("OnChangeGUIMode");
-					}
-					else if (Locator.GetPlayerSuit() && Locator.GetPlayerSuit().IsWearingSuit(true))
-					{
-						if (Locator.GetPlayerSuit().IsWearingHelmet())
-						{
-							Locator.GetPlayerSuit().RemoveHelmet();
-							this.COff = true;
-						}
-						else
-						{
-							Locator.GetPlayerSuit().PutOnHelmet();
-							this.COn = true;
-						}
-					}
-				}
-				if (global::Input.GetKeyDown(KeyCode.J))
-				{
-					if (this.altPressed && Locator.GetShipTransform())
-					{
-						if (this.shiftPressed)
-						{
-							if (Locator.GetShipTransform())
-							{
-								UnityEngine.Object.Destroy(Locator.GetShipTransform().gameObject);
-								this.COn = true;
-							}
-						}
-						else
-						{
-							ShipComponent[] componentsInChildren = Locator.GetShipTransform().GetComponentsInChildren<ShipComponent>();
-							for (int k = 0; k < componentsInChildren.Length; k++)
-							{
-								componentsInChildren[k].SetDamaged(true);
-							}
-							this.COn = true;
-						}
+						oldmode = (int)typeof(GUIMode).GetAnyField("_renderMode").GetValue(null);
+						typeof(GUIMode).GetAnyField("_renderMode").SetValue(null, 7);
+						this.COn = true;
 					}
 					else
 					{
-						Locator.GetPlayerTransform().GetComponent<PlayerResources>().DebugRefillResources();
-						if (Locator.GetShipTransform())
-						{
-							ShipComponent[] componentsInChildren2 = Locator.GetShipTransform().GetComponentsInChildren<ShipComponent>();
-							for (int l = 0; l < componentsInChildren2.Length; l++)
-							{
-								componentsInChildren2[l].SetDamaged(false);
-							}
-						}
-						this.COn = true;
-					}
-				}
-				if (global::Input.GetKey(KeyCode.L))
-				{
-					if (this.shiftPressed)
-					{
-						this.ludicrousMult *= 2f;
-						this.COn = true;
-					}
-					else if (this.altPressed)
-					{
-						this.ludicrousMult /= 2f;
+						typeof(GUIMode).GetAnyField("_renderMode").SetValue(null, oldmode);
 						this.COff = true;
 					}
-					else if (Input.GetKeyDown(KeyCode.L))
-					{
-						this._engageLudicrousSpeed = true;
-						AudioSource.PlayClipAtPoint(Locator.GetAudioManager().GetAudioClipArray(global::AudioType.ToolProbeLaunch)[0], Locator.GetPlayerBody().transform.position);
-					}
+					GlobalMessenger.FireEvent("OnChangeGUIMode");
 				}
-				if (global::Input.GetKeyDown(KeyCode.P))
+				else if (ComboHandler.IsNewlyPressed(inputs["Toggle helmet"]) && Locator.GetPlayerSuit() && Locator.GetPlayerSuit().IsWearingSuit(true))
 				{
-					if (this.altPressed)
+					if (Locator.GetPlayerSuit().IsWearingHelmet())
 					{
-						if (Locator.GetPlayerSuit().GetComponent<JetpackThrusterModel>())
-						{
-							if (!this.wasBoosted)
-							{
-								this.jetpackStanard = Locator.GetPlayerSuit().GetComponent<JetpackThrusterModel>().GetMaxTranslationalThrust();
-								Locator.GetPlayerSuit().GetComponent<JetpackThrusterModel>().TAIcheat_SetTranslationalThrust(50f);
-							}
-							else
-							{
-								Locator.GetPlayerSuit().GetComponent<JetpackThrusterModel>().TAIcheat_SetTranslationalThrust(this.jetpackStanard);
-							}
-							this.wasBoosted = !this.wasBoosted;
-							if (this.wasBoosted)
-							{
-								this.COn = true;
-							}
-							else
-							{
-								this.COff = true;
-							}
-						}
+						Locator.GetPlayerSuit().RemoveHelmet();
+						this.COff = true;
 					}
 					else
 					{
-						Locator.GetPlayerTransform().GetComponent<PlayerResources>().ToggleInvincibility();
-						Locator.GetDeathManager().ToggleInvincibility();
-						Transform shipTransform = Locator.GetShipTransform();
-						if (shipTransform)
-						{
-							shipTransform.GetComponentInChildren<ShipDamageController>().ToggleInvincibility();
-							invincible = !invincible;
-						}
-						if (invincible)
-						{
-							this.COn = true;
-						}
-						else
-						{
-							this.COff = true;
-						}
-					}
-				}
-				if (global::Input.GetKeyDown(KeyCode.O))
-				{
-					if (this.altPressed)
-					{
-						if (PlayerData.KnowsMultipleFrequencies())
-						{
-							PlayerData.ForgetFrequency(SignalFrequency.Quantum);
-							PlayerData.ForgetFrequency(SignalFrequency.EscapePod);
-							PlayerData.ForgetFrequency(SignalFrequency.Statue);
-							PlayerData.ForgetFrequency(SignalFrequency.WarpCore);
-							PlayerData.ForgetFrequency(SignalFrequency.HideAndSeek);
-							this.COff = true;
-						}
-						else
-						{
-							this.COn = true;
-							for (int m = 10; m < 16; m++)
-							{
-								PlayerData.LearnSignal((SignalName)m);
-							}
-							PlayerData.LearnFrequency(SignalFrequency.Quantum);
-							for (int n = 20; n < 26; n++)
-							{
-								PlayerData.LearnSignal((SignalName)n);
-							}
-							PlayerData.LearnFrequency(SignalFrequency.EscapePod);
-							for (int num = 30; num < 33; num++)
-							{
-								PlayerData.LearnSignal((SignalName)num);
-							}
-							PlayerData.LearnFrequency(SignalFrequency.Statue);
-							PlayerData.LearnFrequency(SignalFrequency.WarpCore);
-							for (int num2 = 40; num2 < 50; num2++)
-							{
-								PlayerData.LearnSignal((SignalName)num2);
-							}
-							PlayerData.LearnFrequency(SignalFrequency.HideAndSeek);
-							for (int num3 = 60; num3 < 63; num3++)
-							{
-								PlayerData.LearnSignal((SignalName)num3);
-							}
-						}
-					}
-					else
-					{
-						Locator.GetShipLogManager().RevealAllFacts(this._revealRumorsOnly);
-						this._revealRumorsOnly = false;
+						Locator.GetPlayerSuit().PutOnHelmet();
 						this.COn = true;
 					}
 				}
-				if (global::Input.GetKeyDown(KeyCode.Backslash))
+				if (ComboHandler.IsNewlyPressed(inputs["Destroy ship"]))
+				{
+					if (Locator.GetShipTransform())
+					{
+						UnityEngine.Object.Destroy(Locator.GetShipTransform().gameObject);
+						this.COn = true;
+					}
+				}
+				if (ComboHandler.IsNewlyPressed(inputs["Damage ship"]))
+				{
+					if (Locator.GetShipTransform())
+					{
+						ShipComponent[] componentsInChildren = Locator.GetShipTransform().GetComponentsInChildren<ShipComponent>();
+						for (int k = 0; k < componentsInChildren.Length; k++)
+						{
+							componentsInChildren[k].SetDamaged(true);
+						}
+						this.COn = true;
+					}
+				}
+				if (ComboHandler.IsNewlyPressed(inputs["Fuel+heal"]))
+				{
+					Locator.GetPlayerTransform().GetComponent<PlayerResources>().DebugRefillResources();
+					if (Locator.GetShipTransform())
+					{
+						ShipComponent[] componentsInChildren2 = Locator.GetShipTransform().GetComponentsInChildren<ShipComponent>();
+						for (int l = 0; l < componentsInChildren2.Length; l++)
+						{
+							componentsInChildren2[l].SetDamaged(false);
+						}
+					}
+					this.COn = true;
+				}
+				if (ComboHandler.IsPressed(inputs["Increase Ludicrous Speed"]))
+				{
+					this.ludicrousMult *= 2f;
+					this.COn = true;
+				}
+				if (ComboHandler.IsPressed(inputs["Decrease Ludicrous Speed"]))
+				{
+					this.ludicrousMult /= 2f;
+					this.COff = true;
+				}
+				if (ComboHandler.IsNewlyPressed(inputs["Engage Ludicrous Speed"]))
+				{
+					this._engageLudicrousSpeed = true;
+					AudioSource.PlayClipAtPoint(Locator.GetAudioManager().GetAudioClipArray(global::AudioType.ToolProbeLaunch)[0], Locator.GetPlayerBody().transform.position);
+				}
+				if (ComboHandler.IsNewlyPressed(inputs["Toggle superjetpack"]))
+				{
+					if (Locator.GetPlayerSuit().GetComponent<JetpackThrusterModel>())
+					{
+						if (!this.wasBoosted)
+						{
+							this.jetpackStanard = Locator.GetPlayerSuit().GetComponent<JetpackThrusterModel>().GetMaxTranslationalThrust();
+							Locator.GetPlayerSuit().GetComponent<JetpackThrusterModel>().TAIcheat_SetTranslationalThrust(50f);
+						}
+						else
+						{
+							Locator.GetPlayerSuit().GetComponent<JetpackThrusterModel>().TAIcheat_SetTranslationalThrust(this.jetpackStanard);
+						}
+						this.wasBoosted = !this.wasBoosted;
+						if (this.wasBoosted)
+						{
+							this.COn = true;
+						}
+						else
+						{
+							this.COff = true;
+						}
+					}
+				}
+				if (ComboHandler.IsNewlyPressed(inputs["Toggle PowerOverwhelming"]))
+				{
+					Locator.GetPlayerTransform().GetComponent<PlayerResources>().ToggleInvincibility();
+					Locator.GetDeathManager().ToggleInvincibility();
+					Transform shipTransform = Locator.GetShipTransform();
+					if (shipTransform)
+					{
+						shipTransform.GetComponentInChildren<ShipDamageController>().ToggleInvincibility();
+						invincible = !invincible;
+					}
+					if (invincible)
+					{
+						this.COn = true;
+					}
+					else
+					{
+						this.COff = true;
+					}
+				}
+				if (ComboHandler.IsNewlyPressed(inputs["Learn all frequencies"]))
+				{
+					if (PlayerData.KnowsMultipleFrequencies())
+					{
+						PlayerData.ForgetFrequency(SignalFrequency.Quantum);
+						PlayerData.ForgetFrequency(SignalFrequency.EscapePod);
+						PlayerData.ForgetFrequency(SignalFrequency.Statue);
+						PlayerData.ForgetFrequency(SignalFrequency.WarpCore);
+						PlayerData.ForgetFrequency(SignalFrequency.HideAndSeek);
+						this.COff = true;
+					}
+					else
+					{
+						this.COn = true;
+						for (int m = 10; m < 16; m++)
+						{
+							PlayerData.LearnSignal((SignalName)m);
+						}
+						PlayerData.LearnFrequency(SignalFrequency.Quantum);
+						for (int n = 20; n < 26; n++)
+						{
+							PlayerData.LearnSignal((SignalName)n);
+						}
+						PlayerData.LearnFrequency(SignalFrequency.EscapePod);
+						for (int num = 30; num < 33; num++)
+						{
+							PlayerData.LearnSignal((SignalName)num);
+						}
+						PlayerData.LearnFrequency(SignalFrequency.Statue);
+						PlayerData.LearnFrequency(SignalFrequency.WarpCore);
+						for (int num2 = 40; num2 < 50; num2++)
+						{
+							PlayerData.LearnSignal((SignalName)num2);
+						}
+						PlayerData.LearnFrequency(SignalFrequency.HideAndSeek);
+						for (int num3 = 60; num3 < 63; num3++)
+						{
+							PlayerData.LearnSignal((SignalName)num3);
+						}
+					}
+				}
+				if (ComboHandler.IsNewlyPressed(inputs["Reveal all facts"]))
+				{
+					Locator.GetShipLogManager().RevealAllFacts(this._revealRumorsOnly);
+					this._revealRumorsOnly = false;
+					this.COn = true;
+				}
+				if (ComboHandler.IsNewlyPressed(inputs["Cycle DebugHUD"]))
 				{
 					inputHUD++;
 					inputHUD %= 5;
 				}
-				if (global::Input.GetKeyDown(KeyCode.N))
+				if (ComboHandler.IsNewlyPressed(inputs["Toggle player collision extra"]))
 				{
-					if (this.altPressed)
+					if (Locator.GetPlayerBody().GetRequiredComponent<Rigidbody>().detectCollisions)
 					{
-						if (Locator.GetPlayerBody().GetRequiredComponent<Rigidbody>().detectCollisions)
-						{
-							Locator.GetPlayerBody().DisableCollisionDetection();
-							this.COn = true;
-						}
-						else
-						{
-							Locator.GetPlayerBody().EnableCollisionDetection();
-							this.COff = true;
-						}
+						Locator.GetPlayerBody().DisableCollisionDetection();
+						this.COn = true;
 					}
 					else
 					{
-						foreach (Collider collider in Locator.GetPlayerBody().GetComponentsInChildren<Collider>())
+						Locator.GetPlayerBody().EnableCollisionDetection();
+						this.COff = true;
+					}
+				}
+				if (ComboHandler.IsNewlyPressed(inputs["Toggle player collision"]))
+				{
+					foreach (Collider collider in Locator.GetPlayerBody().GetComponentsInChildren<Collider>())
+					{
+						if (!collider.isTrigger)
 						{
-							if (!collider.isTrigger)
+							collider.enabled = !collider.enabled;
+							if (collider.enabled)
 							{
-								collider.enabled = !collider.enabled;
-								if (collider.enabled)
-								{
-									this.COff = true;
-								}
-								else
-								{
-									this.COn = true;
-								}
+								this.COff = true;
+							}
+							else
+							{
+								this.COn = true;
 							}
 						}
 					}
 				}
-				if (global::Input.GetKeyDown(KeyCode.M))
+				if (ComboHandler.IsNewlyPressed(inputs["Toggle ship collision extra"]))
 				{
-					if (this.altPressed)
+					if (Locator.GetShipBody().GetRequiredComponent<Rigidbody>().detectCollisions)
 					{
-						if (Locator.GetShipBody().GetRequiredComponent<Rigidbody>().detectCollisions)
-						{
-							Locator.GetShipBody().DisableCollisionDetection();
-							this.COn = true;
-						}
-						else
-						{
-							Locator.GetShipBody().EnableCollisionDetection();
-							this.COff = true;
-						}
+						Locator.GetShipBody().DisableCollisionDetection();
+						this.COn = true;
 					}
 					else
 					{
-						foreach (Collider collider2 in Locator.GetShipTransform().GetComponentsInChildren<Collider>())
+						Locator.GetShipBody().EnableCollisionDetection();
+						this.COff = true;
+					}
+				}
+				if (ComboHandler.IsNewlyPressed(inputs["Toggle ship collision"]))
+				{
+					foreach (Collider collider2 in Locator.GetShipTransform().GetComponentsInChildren<Collider>())
+					{
+						if (!collider2.isTrigger)
 						{
-							if (!collider2.isTrigger)
+							collider2.enabled = !collider2.enabled;
+							if (collider2.enabled)
 							{
-								collider2.enabled = !collider2.enabled;
-								if (collider2.enabled)
-								{
-									this.COff = true;
-								}
-								else
-								{
-									this.COn = true;
-								}
+								this.COff = true;
+							}
+							else
+							{
+								this.COn = true;
 							}
 						}
 					}
 				}
-				if (global::Input.GetKeyDown(KeyCode.K))
+				if (ComboHandler.IsNewlyPressed(inputs["Disable nearby Anglerfishes"]))
 				{
 					foreach (AnglerfishController anglerfishController in UnityEngine.Object.FindObjectsOfType<AnglerfishController>())
 					{
-						if (this.altPressed)
+						anglerfishController.gameObject.SetActive(!anglerfishController.gameObject.activeInHierarchy);
+						if (anglerfishController.gameObject.activeInHierarchy)
 						{
-							anglerfishController.gameObject.SetActive(!anglerfishController.gameObject.activeInHierarchy);
-							if (anglerfishController.gameObject.activeInHierarchy)
-							{
-								this.COff = true;
-							}
-							else
-							{
-								this.COn = true;
-							}
+							this.COff = true;
 						}
 						else
 						{
-							anglerfishController.enabled = !anglerfishController.enabled;
-							if (anglerfishController.enabled)
-							{
-								this.COff = true;
-							}
-							else
-							{
-								this.COn = true;
-							}
+							this.COn = true;
 						}
 					}
 				}
-			}
-			if (global::Input.GetKeyDown(KeyCode.Delete))
-			{
-				if (this.altPressed)
+				if (ComboHandler.IsNewlyPressed(inputs["Toggle nearby Anglerfishes AI"]))
 				{
-					this.COn = true;
-					FragmentIntegrity[] array2 = UnityEngine.Object.FindObjectsOfType<FragmentIntegrity>();
-					for (int j = 0; j < array2.Length; j++)
+
+					foreach (AnglerfishController anglerfishController in UnityEngine.Object.FindObjectsOfType<AnglerfishController>())
 					{
-						array2[j].AddDamage(10000f);
+						anglerfishController.enabled = !anglerfishController.enabled;
+						if (anglerfishController.enabled)
+						{
+							this.COff = true;
+						}
+						else
+						{
+							this.COn = true;
+						}
 					}
 				}
-				else
+
+			}
+			if (ComboHandler.IsNewlyPressed(inputs["Break all BH fragments"]))
+			{
+				this.COn = true;
+				FragmentIntegrity[] array2 = UnityEngine.Object.FindObjectsOfType<FragmentIntegrity>();
+				for (int j = 0; j < array2.Length; j++)
 				{
-					this.COn = true;
-					GlobalMessenger.FireEvent("TriggerSupernova");
+					array2[j].AddDamage(10000f);
 				}
 			}
-			if (global::Input.GetKey(KeyCode.E) && global::Input.GetKey(KeyCode.U))
+			if (ComboHandler.IsNewlyPressed(inputs["Trigger Supernova"]))
+			{
+				this.COn = true;
+				GlobalMessenger.FireEvent("TriggerSupernova");
+			}
+			if (ComboHandler.IsNewlyPressed(inputs["Debug Vessel Warp"]))
 			{
 				if (PlayerData.GetWarpedToTheEye()) PlayerData.SaveEyeCompletion();
 				else GlobalMessenger.FireEvent("DebugWarpVessel");
@@ -934,7 +950,7 @@ namespace OW_TAIcheat
 		private int rayMask;
 
 		private int oldmode;
-		public static bool hiddenHUD;
+		private bool hiddenHUD;
 		private int inputHUD = 0;
 	}
 }
