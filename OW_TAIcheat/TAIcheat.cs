@@ -105,38 +105,6 @@ namespace OW_TAIcheat
 		private float _firstPressed = 0f, _lastPressed = 0f;
 		private List<KeyCode> _singles = new List<KeyCode>();
 	}
-	public class ComboComparer : IEqualityComparer<BitArray>
-	{
-		public bool Equals(BitArray x, BitArray y)
-		{
-			if (x.Length != y.Length)
-			{
-				return false;
-			}
-			for (int i = 0; i < x.Length; i++)
-			{
-				if (x[i] ^ y[i])
-				{
-					return false;
-				}
-			}
-			return true;
-		}
-
-		public int GetHashCode(BitArray obj)
-		{
-			int result = 1;
-			for (int i = 0; i < obj.Length; i++)
-			{
-				unchecked
-				{
-					if (obj[i])
-						result = result * i;
-				}
-			}
-			return result;
-		}
-	}
 	public static class ComboHandler
 	{
 		private static void UpdateCombo()
@@ -228,7 +196,7 @@ namespace OW_TAIcheat
 		{
 			return WasTapped(comb) || WasTapped_Single(comb);
 		}
-		private static Int64 ParseCombo(string combo)
+		private static Int64 ParseCombo(string combo, bool forRemoval = false)
 		{
 			combo = combo.Trim().Replace("ctrl", "control");
 			Int64[] curcom = new Int64[7];
@@ -270,7 +238,7 @@ namespace OW_TAIcheat
 			{
 				hsh = hsh * 350 + curcom[i];
 			}
-			return (comboReg.ContainsKey(hsh) ? -3 : hsh);
+			return (comboReg.ContainsKey(hsh) && !forRemoval ? -3 : hsh);
 		}
 		public static int RegisterCombo(Combination combo)
 		{
@@ -293,6 +261,33 @@ namespace OW_TAIcheat
 				comboReg.Add(comb, combo);
 			DebugInput.console.WriteLine("succesfully registered " + combo.GetCombo());
 			return 1;
+		}
+		public static int UnRegisterCombo(Combination combo)
+		{
+			if (comboReg.ContainsValue(combo))
+			{ 
+				if (combo == null || combo.GetCombo() == null)
+				{
+					DebugInput.console.WriteLine("combo is null");
+					return -1;
+				}
+				string[] combs = combo.GetCombo().ToLower().Split('/');
+				List<Int64> combos = new List<Int64>();
+				foreach (string comstr in combs)
+				{
+					Int64 temp = ParseCombo(comstr,true);
+					if (temp <=0&&temp>-3)
+						return (int)temp;
+					else
+						combos.Add(temp);
+				}
+				foreach (Int64 comb in combos)
+					comboReg.Remove(comb);
+				DebugInput.console.WriteLine("succesfully unregistered " + combo.GetCombo());
+				return -3;
+			}
+			else
+				return 1;
 		}
 		public static bool ShouldIgnore(KeyCode code)
 		{
@@ -349,6 +344,19 @@ namespace OW_TAIcheat
 
 		public override void Configure(IModConfig config)
 		{
+			if (inputs!=null)
+			{
+				foreach (string key in inputs.Keys)
+				{
+					int temp = ComboHandler.UnRegisterCombo(inputs[key]);
+					if (temp >-3)
+					{
+						if (temp == -1) ModHelper.Console.WriteLine("Failed to unregister \"" + name + "\": invalid combo!");
+						else if (temp == -2) ModHelper.Console.WriteLine("Failed to unregister \"" + name + "\": too long!");
+						else if (temp == 1) ModHelper.Console.WriteLine("Failed to unregister \"" + name + "\": not registered!");
+					}
+				}
+			}
 			console = ModHelper.Console;
 			inputs = new Dictionary<string, Combination>();
 			foreach (string name in config.Settings.Keys)
