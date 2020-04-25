@@ -9,18 +9,30 @@ using UnityEngine.SceneManagement;
 using System.Collections;
 using System;
 using System.Collections.Generic;
+using Harmony;
 
 namespace OW_TAIcheat
 {
 	class InputInterceptor
 	{
-		public static void SAxisPost(SingleAxisCommand __instance)
+		public static void SAxisRemPre(SingleAxisCommand __instance)
+		{
+			ComboHandler.UnRegisterGamesBinding(__instance);
+		}
+		public static void DAxisRemPre(DoubleAxisCommand __instance)
+		{
+			ComboHandler.UnRegisterGamesBinding(__instance);
+		}
+		public static void SAxisUpdPost(SingleAxisCommand __instance)
 		{
 			KeyCode pos, neg;
+			ComboHandler.RegisterGamesBinding(__instance);
 			FieldInfo val = typeof(SingleAxisCommand).GetField("_value", BindingFlags.NonPublic | BindingFlags.Instance);
 			float curval = (float)(val.GetValue(__instance));
+			int axisdir = 1;
 			if (OWInput.UsingGamepad())
 			{
+				axisdir = (int)(typeof(SingleAxisCommand).GetField("_axisDirection", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(__instance));
 				pos = (KeyCode)(typeof(SingleAxisCommand).GetField("_gamepadKeyCodePositive", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(__instance));
 				neg = (KeyCode)(typeof(SingleAxisCommand).GetField("_gamepadKeyCodeNegative", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(__instance));
 			}
@@ -29,17 +41,52 @@ namespace OW_TAIcheat
 				pos = (KeyCode)(typeof(SingleAxisCommand).GetField("_keyPositive", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(__instance));
 				neg = (KeyCode)(typeof(SingleAxisCommand).GetField("_keyNegative", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(__instance));
 			}
-			if (ComboHandler.ShouldIgnore(pos))
+			if (Input.GetKey(pos) && ComboHandler.ShouldIgnore(pos))
 			{
-				curval -= 1f;
-//				DebugInput.console.WriteLine("succesfully ignored " + pos.ToString());
+				curval -= 1f * axisdir;
+				//DebugInput.logger.Log("succesfully ignored " + pos.ToString());
 			}
-			if (ComboHandler.ShouldIgnore(neg))
+			if (Input.GetKey(neg) && ComboHandler.ShouldIgnore(neg))
 			{
-				curval += 1f;
-//				DebugInput.console.WriteLine("succesfully ignored " + neg.ToString());
+				curval += 1f * axisdir;
+				//DebugInput.logger.Log("succesfully ignored " + neg.ToString());
 			}
 			val.SetValue(__instance, curval);
+		}
+		public static void DAxisUpdPost(DoubleAxisCommand __instance)
+		{
+			ComboHandler.RegisterGamesBinding(__instance);
+			if (!OWInput.UsingGamepad())
+			{
+				KeyCode pos, neg;
+				FieldInfo val = typeof(DoubleAxisCommand).GetField("_value", BindingFlags.NonPublic | BindingFlags.Instance);
+				Vector2 curval = (Vector2)(val.GetValue(__instance));
+				pos = (KeyCode)(typeof(DoubleAxisCommand).GetField("_keyboardXPos", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(__instance));
+				neg = (KeyCode)(typeof(DoubleAxisCommand).GetField("_keyboardXNeg", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(__instance));
+				if (Input.GetKey(pos) && ComboHandler.ShouldIgnore(pos))
+				{
+					curval.x -= 1f;
+					//				DebugInput.console.WriteLine("succesfully ignored " + pos.ToString());
+				}
+				if (Input.GetKey(neg) && ComboHandler.ShouldIgnore(neg))
+				{
+					curval.x += 1f;
+					//				DebugInput.console.WriteLine("succesfully ignored " + neg.ToString());
+				}
+				pos = (KeyCode)(typeof(DoubleAxisCommand).GetField("_keyboardYPos", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(__instance));
+				neg = (KeyCode)(typeof(DoubleAxisCommand).GetField("_keyboardYNeg", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(__instance));
+				if (Input.GetKey(pos) && ComboHandler.ShouldIgnore(pos))
+				{
+					curval.y -= 1f;
+					//				DebugInput.console.WriteLine("succesfully ignored " + pos.ToString());
+				}
+				if (Input.GetKey(neg) && ComboHandler.ShouldIgnore(neg))
+				{
+					curval.y += 1f;
+					//				DebugInput.console.WriteLine("succesfully ignored " + neg.ToString());
+				}
+				val.SetValue(__instance, curval);
+			}
 		}
 	}
 	public class Combination
@@ -69,7 +116,7 @@ namespace OW_TAIcheat
 				_lastPressed = Time.realtimeSinceStartup;
 			}
 			else
-				_first = false;
+				_first = true;
 			_pressed = state;
 		}
 		public float GetLastPressMoment()
@@ -89,7 +136,10 @@ namespace OW_TAIcheat
 			}
 			return false;
 		}
-
+		public void ClearSingles()
+		{
+			_singles.Clear();
+		}
 		public void AddSingle(KeyCode single)
 		{
 			_singles.Add(single);
@@ -148,20 +198,25 @@ namespace OW_TAIcheat
 				lastPressed = null;
 			}
 		}
-		public static bool IsPressed(Combination comb)
+		public static bool IsPressed_Combo(Combination comb)
 		{
 			UpdateCombo();
 			return lastPressed == comb;
 		}
-		public static bool IsNewlyPressed(Combination comb, bool keep = false)
+		public static bool IsNewlyPressed_Combo(Combination comb, bool keep = false)
 		{
 			UpdateCombo();
 			return lastPressed == comb && comb.IsFirst(keep);
 		}
-		public static bool WasTapped(Combination comb)
+		public static bool WasTapped_Combo(Combination comb)
 		{
 			UpdateCombo();
 			return comb != lastPressed && (Time.realtimeSinceStartup - comb.GetLastPressMoment() < tapKeep) && (comb.GetPressDuration() < tapDuration);
+		}
+		public static bool IsNewlyReleased_Combo(Combination comb, bool keep = false)
+		{
+			UpdateCombo();
+			return lastPressed != comb && comb.IsFirst(keep) && (Time.realtimeSinceStartup - comb.GetLastPressMoment() < tapKeep);
 		}
 		public static bool IsPressed_Single(Combination comb)
 		{
@@ -184,9 +239,13 @@ namespace OW_TAIcheat
 		{
 			return (!IsPressed_Single(comb)) && (Time.realtimeSinceStartup - comb.GetLastPressMoment() < tapKeep) && (comb.GetPressDuration() < tapDuration);
 		}
+		public static bool IsNewlyReleased_Single(Combination comb, bool keep = false)
+		{
+			return (!IsPressed_Single(comb)) && comb.IsFirst(keep) && (Time.realtimeSinceStartup - comb.GetLastPressMoment() < tapKeep);
+		}
 		public static bool IsPressed_Either(Combination comb)
 		{
-			return IsPressed(comb) || IsPressed_Single(comb);
+			return IsPressed_Combo(comb) || IsPressed_Single(comb);
 		}
 		public static bool IsNewlyPressed_Either(Combination comb, bool keep = false)
 		{
@@ -194,7 +253,11 @@ namespace OW_TAIcheat
 		}
 		public static bool WasTapped_Either(Combination comb)
 		{
-			return WasTapped(comb) || WasTapped_Single(comb);
+			return WasTapped_Combo(comb) || WasTapped_Single(comb);
+		}
+		public static bool IsNewlyReleased_Either(Combination comb, bool keep = false)
+		{
+			return IsNewlyReleased_Combo(comb, keep) || IsNewlyReleased_Single(comb, keep);
 		}
 		private static Int64 ParseCombo(string combo, bool forRemoval = false)
 		{
@@ -238,13 +301,17 @@ namespace OW_TAIcheat
 			{
 				hsh = hsh * 350 + curcom[i];
 			}
+			if (hsh < 350)
+				if (gamecntr[hsh] > 0)
+					return -3;
 			return (comboReg.ContainsKey(hsh) && !forRemoval ? -3 : hsh);
 		}
 		public static int RegisterCombo(Combination combo)
 		{
+			combo.ClearSingles();
 			if (combo == null || combo.GetCombo() == null)
 			{
-				DebugInput.console.WriteLine("combo is null");
+				DebugInput.console.WriteLine("combination is null");
 				return -1;
 			}
 			string[] combs = combo.GetCombo().ToLower().Split('/');
@@ -258,8 +325,12 @@ namespace OW_TAIcheat
 					combos.Add(temp);
 			}
 			foreach (Int64 comb in combos)
+			{
 				comboReg.Add(comb, combo);
-			DebugInput.console.WriteLine("succesfully registered " + combo.GetCombo());
+				if (comb < 350)
+					combo.AddSingle((KeyCode)comb);
+			}
+			DebugInput.logger.Log("succesfully registered " + combo.GetCombo());
 			return 1;
 		}
 		public static int UnRegisterCombo(Combination combo)
@@ -268,7 +339,7 @@ namespace OW_TAIcheat
 			{ 
 				if (combo == null || combo.GetCombo() == null)
 				{
-					DebugInput.console.WriteLine("combo is null");
+					DebugInput.console.WriteLine("combination is null");
 					return -1;
 				}
 				string[] combs = combo.GetCombo().ToLower().Split('/');
@@ -283,20 +354,71 @@ namespace OW_TAIcheat
 				}
 				foreach (Int64 comb in combos)
 					comboReg.Remove(comb);
-				DebugInput.console.WriteLine("succesfully unregistered " + combo.GetCombo());
+				DebugInput.logger.Log("succesfully unregistered " + combo.GetCombo());
 				return -3;
 			}
 			else
 				return 1;
 		}
+
+		public static void RegisterGamesBinding(InputCommand binding)
+		{
+			if (!bindreg.Contains(binding))
+			{
+				KeyCode key;
+				FieldInfo[] fields;
+				if (binding is SingleAxisCommand)
+					fields = typeof(SingleAxisCommand).GetFields(BindingFlags.NonPublic | BindingFlags.Instance);
+				else
+					fields = typeof(DoubleAxisCommand).GetFields(BindingFlags.NonPublic | BindingFlags.Instance);
+				foreach (FieldInfo field in fields)
+				{
+					if (field.FieldType == typeof(KeyCode))
+					{
+						key = (KeyCode)(field.GetValue(binding));
+						if (key != KeyCode.None)
+						{
+							gamecntr[(int)key]++;
+							//DebugInput.console.WriteLine("Succesfully registered game's binding: " + key.ToString());
+						}
+					}
+				}
+				bindreg.Add(binding);
+			}
+		}
+		public static void UnRegisterGamesBinding(InputCommand binding)
+		{
+			if (bindreg.Contains(binding))
+			{
+				KeyCode key;
+				FieldInfo[] fields;
+				if (binding is SingleAxisCommand)
+					fields = typeof(SingleAxisCommand).GetFields(BindingFlags.NonPublic | BindingFlags.Instance);
+				else
+					fields = typeof(DoubleAxisCommand).GetFields(BindingFlags.NonPublic | BindingFlags.Instance);
+				foreach (FieldInfo field in fields)
+					if (field.FieldType == typeof(KeyCode))
+					{
+						key = (KeyCode)(field.GetValue(binding));
+						if (key != KeyCode.None)
+						{
+							gamecntr[(int)key]--;
+							//DebugInput.console.WriteLine("Succesfully unregistered game's binding: " + key.ToString());
+						}
+					}
+				bindreg.Remove(binding);
+			}
+		}
 		public static bool ShouldIgnore(KeyCode code)
 		{
 			UpdateCombo();
-			return lastPressed != null && Time.realtimeSinceStartup - timeout[(int)code] > cooldown;
+			return lastPressed != null && Time.realtimeSinceStartup - timeout[(int)code] < cooldown;
 		}
 
 		private static float[] timeout = new float[350];
+		private static int[] gamecntr = new int[350];
 		private static Dictionary<Int64, Combination> comboReg = new Dictionary<Int64, Combination>();
+		private static HashSet<InputCommand> bindreg = new HashSet<InputCommand>();
 		private static Combination lastPressed;
 		private static float lastUpdate;
 		private static float cooldown = 0.016f;
@@ -335,15 +457,21 @@ namespace OW_TAIcheat
 		}
 
 		public static IModConsole console;
+		public static IModLogger logger;
 
 		private void Start()
 		{
-			ModHelper.HarmonyHelper.AddPostfix<SingleAxisCommand>("Update", typeof(InputInterceptor), "SAxisPost");
+			ModHelper.HarmonyHelper.AddPrefix<SingleAxisCommand>("ClearBinding", typeof(InputInterceptor), "SAxisRemPre");
+			ModHelper.HarmonyHelper.AddPrefix<DoubleAxisCommand>("ClearBinding", typeof(InputInterceptor), "DAxisRemPre");
+			ModHelper.HarmonyHelper.AddPostfix<SingleAxisCommand>("Update", typeof(InputInterceptor), "SAxisUpdPost");
+			ModHelper.HarmonyHelper.AddPostfix<DoubleAxisCommand>("Update", typeof(InputInterceptor), "DAxisUpdPost");
 			ModHelper.Console.WriteLine("TAICheat ready!");
 		}
 
 		public override void Configure(IModConfig config)
 		{
+			console = ModHelper.Console;
+			logger = ModHelper.Logger;
 			if (inputs!=null)
 			{
 				foreach (string key in inputs.Keys)
@@ -357,7 +485,6 @@ namespace OW_TAIcheat
 					}
 				}
 			}
-			console = ModHelper.Console;
 			inputs = new Dictionary<string, Combination>();
 			foreach (string name in config.Settings.Keys)
 			{
