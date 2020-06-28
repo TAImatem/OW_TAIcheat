@@ -272,9 +272,9 @@ namespace OW_TAIcheat
 				if (key.Contains("xbox_"))
 				{
 					string tkey = key.Substring(5);
-					XboxButton tnum = (XboxButton)Enum.Parse(typeof(XboxButton), tkey, true);
-					if (Enum.IsDefined(typeof(XboxButton), tnum))
-						num = InputTranslator.GetKeyCode(tnum, false);
+					JoystickButton tnum = (JoystickButton)Enum.Parse(typeof(JoystickButton), tkey, true);
+					if (Enum.IsDefined(typeof(JoystickButton), tnum))
+						num = InputTranslator.GetButtonKeyCode(tnum);
 					else
 						return -1;
 				}
@@ -1063,13 +1063,16 @@ namespace OW_TAIcheat
 				else GlobalMessenger.FireEvent("DebugWarpVessel");
 				this.COn = true;
 			}
-			if (ComboHandler.IsNewlyPressed_Either(inputs["Timelapse"]))
+			if (Mathf.Abs(Time.timeScale - 1f) < 1e-4 || Mathf.Abs(Time.timeScale - 10f) < 1e-4)
 			{
-				Time.timeScale = 10f;
-			}
-			else if (Mathf.Abs(Time.timeScale - 1f) > 1e-4 && !ComboHandler.IsPressed_Either(inputs["Timelapse"]))
-			{
-				Time.timeScale = 1f;
+				if (ComboHandler.IsNewlyPressed_Either(inputs["Timelapse"]))
+				{
+					Time.timeScale = 10f;
+				}
+				else if (Mathf.Abs(Time.timeScale - 1f) > 1e-4 && !ComboHandler.IsPressed_Either(inputs["Timelapse"]))
+				{
+					Time.timeScale = 1f;
+				}
 			}
 
 			if (this.COn)
