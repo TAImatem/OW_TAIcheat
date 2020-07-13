@@ -426,7 +426,7 @@ namespace TAIcheat
                 if (ModHelper.Input.IsNewlyPressed(inputs["Engage Ludicrous Speed"]))
                 {
                     this._engageLudicrousSpeed = true;
-                    AudioSource.PlayClipAtPoint(Locator.GetAudioManager().GetAudioClipArray(global::AudioType.ToolProbeLaunch)[0], Locator.GetPlayerBody().transform.position);
+                    AudioSource.PlayClipAtPoint(Locator.GetAudioManager().GetAudioClipArray(global::AudioType.ToolProbeLaunch)[0], Locator.GetShipBody().transform.position);
                 }
                 if (ModHelper.Input.IsNewlyPressed(inputs["Toggle superjetpack"]) && Locator.GetPlayerSuit().GetComponent<JetpackThrusterModel>())
                 {
